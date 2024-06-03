@@ -6,12 +6,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include "arena.h"
 
-
-const char HTTP_DUMMY_RESPONSE[] = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nMy payload is the shit\r\n";
-const char HTTP_ERROR_RESPONSE[] = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nYou issued a malformed or illegal request.\r\n";
-const char HTTP_TIMEOUT_RESPONSE[] = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nTimed out bitch.\r\n";
-
+const char HTTP_DUMMY_RESPONSE[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<html><h1>My payload is the shit</h1></html>";
+const char HTTP_ERROR_RESPONSE[] = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nYou issued a malformed or illegal request.";
+const char HTTP_TIMEOUT_RESPONSE[] = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nTimed out bitch.";
 
 #define true 1
 #define false 0
@@ -36,6 +35,7 @@ static void print_http_request(const http_request_line *request) {
 }
 
 unsigned validate_request_line(http_request_line *request) {
+    print_http_request(request);
     if(strcmp(request->method, "GET") != 0 && strcmp(request->method, "HEAD") != 0) {
         printf("request->method: %s != GET|HEAD\n", request->method);
         return false;
@@ -85,7 +85,7 @@ int strnchr(const char buffer[], int buffer_size, int offset, char c) {
 #define MALFORMED_REQUEST -1
 #define INVALID_REQUEST -2 // For example http method other than GET|HEAD or wrong http version
 
-static int parse_request_line(http_request_line *request, const char recv_buffer[], int recv_buffer_size) {
+static int parse_request_line(memory_arena *arena, http_request_line *request, const char recv_buffer[], int recv_buffer_size) {
     int crlf_index = find_crlf(recv_buffer, recv_buffer_size);
     int request_line_end = crlf_index - 2;
     if(request_line_end < 0) return INCOMPLETE_REQUEST_LINE;
@@ -98,15 +98,15 @@ static int parse_request_line(http_request_line *request, const char recv_buffer
     // GET__\r\n <--- avoid such cases
     if(second_whitespace_index + 1 >= request_line_end || second_whitespace_index == -1) return MALFORMED_REQUEST;
 
-    request->method = (char *) malloc(sizeof(char) * (first_whitespace_index));
+    request->method = (char *) arena_allocate(arena, sizeof(char) * first_whitespace_index + 1);
     memcpy(request->method, recv_buffer, first_whitespace_index);
     request->method[first_whitespace_index] = '\0';
 
-    request->request_target = (char *) malloc(sizeof(char) * second_whitespace_index - first_whitespace_index);
+    request->request_target = (char *) arena_allocate(arena, sizeof(char) * second_whitespace_index - first_whitespace_index + 1);
     memcpy(request->request_target, recv_buffer+first_whitespace_index+1, second_whitespace_index - first_whitespace_index);
     request->request_target[second_whitespace_index - first_whitespace_index] = '\0';
 
-    request->http_version = (char *) malloc(sizeof(char) * request_line_end - second_whitespace_index);
+    request->http_version = (char *) arena_allocate(arena, sizeof(char) * request_line_end - second_whitespace_index);
     memcpy(request->http_version, recv_buffer+second_whitespace_index+1, request_line_end-second_whitespace_index);
     request->http_version[request_line_end - second_whitespace_index] = '\0';
 
@@ -115,11 +115,11 @@ static int parse_request_line(http_request_line *request, const char recv_buffer
     return COMPLETE_REQUEST_LINE;
 }
 
-int parse_request(http_request *request, const char recv_buffer[], int recv_buffer_size) {
+int parse_request(memory_arena *arena, http_request *request, const char recv_buffer[], int recv_buffer_size) {
     int status;
 
     if(!request->request_line.complete) {
-        status = parse_request_line(&request->request_line, recv_buffer, recv_buffer_size);
+        status = parse_request_line(arena, &request->request_line, recv_buffer, recv_buffer_size);
         if(status == MALFORMED_REQUEST || status == INCOMPLETE_REQUEST_LINE) return status;
     }
 

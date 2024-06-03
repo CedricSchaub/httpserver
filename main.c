@@ -1,5 +1,3 @@
-#include <asm-generic/errno.h>
-#include <asm-generic/socket.h>
 #include <errno.h>
 #include <stdio.h>
 #include <netinet/in.h>
@@ -8,14 +6,14 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
-#include <memory.h>
 #include <unistd.h>
-#include <malloc.h>
+#include "arena.h"
 #include "http.h"
 #include <signal.h>
 
 #define RECV_BUFFER_SIZE 1000
 #define SERVER_BACKLOG 10
+#define MB(A) A*1024
 
 static const int yes = 1;
 
@@ -26,7 +24,20 @@ void termination_handler(int signum) {
     shutdown_server = true;
 }
 
+void send_file(const char *path) {
+    char new_path[255] = {"/tmp"};
+    strcat(&new_path, path);
+
+    FILE *fp = fopen(new_path, "r");
+    // TODO: implement quick and dirty
+
+    fclose(fp);
+}
+
 int main(void) {
+    // setup arena
+    memory_arena arena = { .base = NULL, .offset = 0, .size = 0 };
+    initialize_arena(&arena, MB(50));
 
     // setup signal handler
     struct sigaction action = { .sa_handler = termination_handler, .sa_flags = 0 };
@@ -74,7 +85,7 @@ int main(void) {
             memcpy(buffer + total_received_bytes, recv_buffer, received_bytes);
             total_received_bytes += received_bytes;
 
-            request_status = parse_request(&request, buffer, total_received_bytes);
+            request_status = parse_request(&arena, &request, buffer, total_received_bytes);
 
             if(request_status == COMPLETE_REQUEST || request_status == MALFORMED_REQUEST || request_status == INVALID_REQUEST) {
                 break;
@@ -92,11 +103,8 @@ int main(void) {
         }
         // TODO: Add unknown error response
 
-        free(request.request_line.request_target);
-        free(request.request_line.method);
-        free(request.request_line.http_version);
-
         printf("about to close incoming socket\n");
+        reset_arena(&arena);
         // try to shutdown the socket so that the client does know what's gonna happen.
         // if I dont't do this, the client gets a Reset connection by peer error (curl e.x)
         shutdown(incoming_socket_fd, SHUT_RDWR);
@@ -106,6 +114,7 @@ int main(void) {
     printf("about to close server socket\n");
     freeaddrinfo(result);
     close(socket_fd);
+    free_arena(&arena);
 
     return 0;
 }
