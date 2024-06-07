@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include "arena.h"
 #include "http.h"
+#include "args.h"
 #include <signal.h>
 
 #define RECV_BUFFER_SIZE 1000
@@ -34,10 +35,14 @@ void send_file(const char *path) {
     fclose(fp);
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
     // setup arena
     memory_arena arena = { .base = NULL, .offset = 0, .size = 0 };
     initialize_arena(&arena, MB(50));
+
+    // parse command line arguments
+    http_server_args server_args = create_default_args();
+    parse_args(&server_args, argv, argc);
 
     // setup signal handler
     struct sigaction action = { .sa_handler = termination_handler, .sa_flags = 0 };
@@ -52,15 +57,16 @@ int main(void) {
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
-    getaddrinfo("localhost", "4545", &hints, &result);
+    getaddrinfo(server_args.host, server_args.port, &hints, &result);
 
     int socket_fd = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
     bind(socket_fd, result->ai_addr, result->ai_addrlen);
 
     setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
 
-    printf("Started server listening on port: %s\n\n", "4545");
     listen(socket_fd, SERVER_BACKLOG);
+
+    printf("Started server %s:%s\n", server_args.host, server_args.port);
 
     socklen_t addr_size = sizeof(incoming_addr);
 
